@@ -120,12 +120,3 @@ logs = [
     "/data/miuilog",   # 改成 ColorOS 自己的日志路径：TODO
 ]
 
-# OPPO 更新服务器地址未知；已知 full OTA 由 oplus 的 ota-api 下发
-[update]
-server = "TODO"
-
-[stock]
-# 必须自己从 ColorOS 16 全量包里取 recovery_a
-version = "PLQ110_16.0.7.201(CN01)"
-package = ""   # TODO 本地路径或直链
-recovery = ""  # TODO recovery_a 的 sha256
