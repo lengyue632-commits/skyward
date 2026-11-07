@@ -127,10 +127,12 @@ impl Backlight {
 /// their factory tests drive the panel to, on the backlight's own scale:
 /// the 13 Ultra's panels give that level as well, and it comes to the same
 /// half of their range as the normal maximum they give.
-const NORMAL_MAX: [(&str, &str); 3] = [
+const NORMAL_MAX: [(&str, &str); 4] = [
     ("mi,normal-max-brightness-clone", "mi,max-brightness-clone"),
     ("mi,max-brightness-normal", "qcom,mdss-dsi-bl-max-level"),
     ("mi,mdss-dsi-fac-bl-max-level", "qcom,mdss-dsi-bl-max-level"),
+    // OPPO's own panels: the level their stock slider reaches its top at.
+    ("oplus,dsi-bl-normal-max-level", "qcom,mdss-dsi-bl-max-level"),
 ];
 
 /// The raw backlight level, out of `max`, at the panel's normal maximum.
@@ -158,12 +160,15 @@ fn normal_max(max: u32) -> Result<u32> {
         let cell: [u8; 4] = bytes.as_slice().try_into().map_err(|_| anyhow!("{} is not one cell", path.display()))?;
         Ok(u32::from_be_bytes(cell))
     };
-    let (normal, full) = NORMAL_MAX
-        .iter()
-        .find(|(normal, _)| node.join(normal).exists())
-        .with_context(|| format!("panel {name} gives its normal maximum as none of {NORMAL_MAX:?}"))?;
+    let Some((normal, full)) = NORMAL_MAX.iter().find(|(normal, _)| node.join(normal).exists()) else {
+        eprintln!("panel {name}: no normal maximum in the device tree; taking the backlight top as it");
+        return Ok(max);
+    };
     let (normal, full) = (cell(normal)?, cell(full)?);
-    ensure!(normal > 0 && normal <= full, "panel {name}: normal maximum {normal} out of {full}");
+    if !(normal > 0 && normal <= full) {
+        eprintln!("panel {name}: normal maximum {normal} out of {full}; taking the backlight top as it");
+        return Ok(max);
+    }
     Ok((f64::from(max) * f64::from(normal) / f64::from(full)).round() as u32)
 }
 
@@ -1022,7 +1027,8 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
     }
     let mut info = skyward_info::collect(cfg)?;
     let fonts = Fonts::load(font, 0, mono)?;
-    let mut surface = KmsSurface::open("/dev/dri/card0")?;
+    let mut surface = KmsSurface::open("/dev/dri/card0")
+        .inspect_err(|e| { let _ = skyward_sys::kmsg(&format!("skyward: display: {e:#}")); })?;
     let (w, h) = surface.size();
     eprintln!("display {}", surface.describe());
     let mut inputs = Inputs::open(w, h, cfg.touch.writes.clone())?;
@@ -1031,7 +1037,8 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
     // adbd and fastbootd ask over it to go over to fastboot and back.
     let control = Control::open()?;
     let mut haptics = cfg.haptics.as_ref().map(Haptics::open).transpose()?;
-    let mut backlight = Backlight::open()?;
+    let mut backlight = Backlight::open()
+        .inspect_err(|e| { let _ = skyward_sys::kmsg(&format!("skyward: backlight: {e:#}")); })?;
     let first = match &request.work {
         Work::Fastboot => Screen::Fastboot,
         Work::PromptWipeData => Screen::CantStart,
