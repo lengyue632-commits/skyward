@@ -1,0 +1,131 @@
+# Skyward 设备配置：OnePlus Ace 6 (PLQ110 / OP6113L1)，ColorOS 16.1
+# 状态：草稿。标 TODO 的项必须在真机/stock recovery 里实测后确定。
+# 大部分内容从 neo(nezha, 小米17Ultra) 结构抄来并改为本机实测值——
+# 两台机器同为 SM8850 + Peach v2 WLAN + qcom-hv-haptics，硬件栈高度重合。
+
+[device]
+codename = "op6113l1"
+brand = "OnePlus"
+model = "OnePlus Ace 6"
+ab = true
+soc = { hans = "骁龙®8至尊版移动平台", hant = "Snapdragon® 8 Elite 行動平台", en = "Snapdragon® 8 Elite Mobile Platform" }
+# 本机 ro.build.display.id = PLQ110_16.0.7.201(CN01)，ro.build.version.oplusrom = V16.1.0
+os_version_prop = "ro.build.version.oplusrom"
+
+[display]
+width = 1272
+height = 2800
+density = 560
+diagonal = 6.83          # TODO 核对官方参数
+corner_radius = 130      # TODO 从 ColorOS framework-res 的圆角取，不能猜
+
+[modules]
+sources = ["vendor_boot", "vendor_dlkm", "vendor", "system_dlkm"]
+# OPPO 的触摸不是小米的 synaptics_tcm2，是自研 HBP 框架 + 海栎创/Synaptics 插件
+# 本机 /proc/cmdline: touch_panel0=0:synaptics-s3910:tianma  → 驱动 = oplus_bsp_tp_hbp_syna_s3910
+load = ["oplus_bsp_tp_common", "oplus_bsp_tp_notify", "oplus_bsp_tp_hbp_syna_s3910"]
+
+[touch]
+# TODO 关键未知项。OPPO 的触摸输入设备名是 "touchpanel"(event6)，
+# 但 raw/报告模式开关是驱动私有 sysfs（不是小米的 /sys/class/touch/touch_dev/enable_touch_raw）。
+# 需要在 stock recovery 里 ls 驱动 sysfs group 后填。
+writes = []
+
+[firmware]
+partition = "modem"
+
+# OPPO 的 TEE 把密钥材料放在 persist（qcc/secnvm/tam/hexlp 目录都在），
+# 和小米一样 recovery 默认不挂载，必须挂。
+[partitions]
+mounted = ["persist"]
+
+[logd]
+libraries = ["/mnt/system/system/lib64/libsysutils.so", "/mnt/system/system/lib64/libcap.so"]
+
+# 以下服务链已在本机确认存在：qseecomd、hlosminkdaemon、keymint、gatekeeper。
+# 注意：OPPO 没有 weaver 服务（Ace6 不在 TEE 里放 weaver，改用 gatekeeper 直连），
+# 所以比小米的配置简单——少了 goodix/thales weaver 两段。
+[[service]]
+path = "/vendor/bin/hw/android.hardware.security.keymint-service-qti"
+libraries = ["/system/lib64", "/vendor/lib64"]
+ready_service = "android.hardware.security.keymint.IKeyMintDevice/default"
+registers = [
+    "android.hardware.security.keymint.IRemotelyProvisionedComponent/default",
+    "android.hardware.security.secureclock.ISecureClock/default",
+    "android.hardware.security.sharedsecret.ISharedSecret/default",
+]
+user = "system"
+groups = ["system", "drmrpc"]
+
+[[service]]
+path = "/vendor/bin/hw/android.hardware.gatekeeper-service-qti"
+libraries = ["/system/lib64", "/vendor/lib64"]
+ready_service = "android.hardware.gatekeeper.IGatekeeper/default"
+user = "system"
+groups = ["system"]
+
+[[service]]
+path = "/vendor/bin/hlosminkdaemon"
+libraries = ["/system/lib64", "/vendor/lib64"]
+user = "system"
+groups = ["system", "wakelock"]
+capabilities = ["WAKE_ALARM", "BLOCK_SUSPEND"]
+
+[[service]]
+path = "/vendor/bin/qseecomd"
+libraries = ["/system/lib64", "/vendor/lib64"]
+ready_property = "vendor.sys.listeners.registered"
+user = "root"
+groups = ["root", "drmrpc"]
+
+[[service]]
+path = "/vendor/bin/hw/android.hardware.boot-service.qti"
+libraries = ["/system/lib64", "/vendor/lib64"]
+ready_service = "android.hardware.boot.IBootControl/default"
+user = "root"
+groups = ["root"]
+
+[wlan]
+# 与本机 /vendor/lib/modules 对齐（Peach v2）
+modules = ["rfkill", "cnss2", "cnss_plat_ipc_qmi_svc", "cnss_nl", "cnss_prealloc", "cnss_utils", "qca_cld3_peach_v2"]
+writes = [{ path = "/sys/kernel/cnss/fs_ready", value = "1" }]
+interface = "wlan0"
+supplicant = "/vendor/bin/hw/wpa_supplicant"
+libraries = ["/system/lib64", "/vendor/lib64"]
+service = "android.hardware.wifi.supplicant.ISupplicant/default"
+probe = "http://connectivitycheck.gstatic.com/generate_204"   # TODO 用 ColorOS 实际探测地址
+
+[haptics]
+# 本机 /sys/class/qcom-haptics/lra_frequency_hz 存在，与小米一致
+resonance = "/sys/class/qcom-haptics/lra_frequency_hz"
+strength = { lightest = 0.25, strongest = 0.75 }
+
+[backup]
+efs = ["modemst1", "modemst2", "fsg", "fsc", "persist", "oplusstanvbk_a"]
+# OPPO 的 TEE/指纹目录名待核对，先按位置对照
+data_skipped = [
+    "vendor/tzstorage",
+    "vendor/qtee",
+    "vendor/goodix",
+    "vendor/fingerprint",
+    "vendor/fpdata",
+]
+
+[wipe]
+logs = [
+    "/data/vendor/oplusreserve",
+    "/data/vendor/diag",
+    "/data/vendor/tombstones",
+    "/data/vendor/ramdump",
+    "/data/miuilog",   # 改成 ColorOS 自己的日志路径：TODO
+]
+
+# OPPO 更新服务器地址未知；已知 full OTA 由 oplus 的 ota-api 下发
+[update]
+server = "TODO"
+
+[stock]
+# 必须自己从 ColorOS 16 全量包里取 recovery_a
+version = "PLQ110_16.0.7.201(CN01)"
+package = ""   # TODO 本地路径或直链
+recovery = ""  # TODO recovery_a 的 sha256
